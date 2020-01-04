@@ -1,5 +1,5 @@
 #!/bin/bash
-
+####
 git add --a
 git status
 git commit
