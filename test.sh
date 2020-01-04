@@ -1,7 +1,7 @@
 #!/bin/bash
 #--------
 git add --a
-gid status
+git status
 git commit
-gid status
+git status
 git push
