@@ -12,6 +12,7 @@ MODULE module_mp_wdm6
    USE module_domain, ONLY : HISTORY_ALARM, Is_alarm_tstep
    USE module_mp_radar
 !
+   PRIVATE :: DERF1
    REAL, PARAMETER, PRIVATE :: dtcldcr     = 120. ! maximum time step for minor loops
    REAL, PARAMETER, PRIVATE :: n0r = 8.e6         ! intercept parameter rain
 !   REAL, PARAMETER, PRIVATE :: n0g = 4.e6         ! intercept parameter graupel ! RAS - now set in subroutine based on namelist option
@@ -46,7 +47,7 @@ MODULE module_mp_wdm6
    REAL, PARAMETER, PRIVATE :: dens  =  100.0     ! Density of snow
    REAL, PARAMETER, PRIVATE :: qs0   =  6.e-4     ! threshold amount for aggretion to occur
 !
-   REAL, PARAMETER, PRIVATE :: satmax = 1.008    ! maximum saturation value for CCN activation 
+   REAL, PARAMETER, PRIVATE :: satmax = 1.008     ! maximum saturation value for CCN activation 
                                                   ! 1.008 for maritime /1.0048 for conti 
    REAL, PARAMETER, PRIVATE :: actk = 0.6         ! parameter for the CCN activation
    REAL, PARAMETER, PRIVATE :: actr = 1.5         ! radius of activated CCN drops
@@ -56,7 +57,31 @@ MODULE module_mp_wdm6
    REAL, PARAMETER, PRIVATE :: di600 = 6.e-4      ! parameter related with accretion and collection of cloud drops
    REAL, PARAMETER, PRIVATE :: di2000 = 2000.e-6  ! parameter related with accretion and collection of cloud drops 
    REAL, PARAMETER, PRIVATE :: di82    = 82.e-6   ! dimater related with raindrops evaporation
-   REAL, PARAMETER, PRIVATE :: di15    = 15.e-6   ! auto conversion takes place beyond this diameter 
+   REAL, PARAMETER, PRIVATE :: di15    = 15.e-6   ! auto conversion takes place beyond this diameter
+! AEROSOL PARAMETERS FOR IACT = 2
+   REAL, PARAMETER, PRIVATE :: MW   = 0.018       ! MOLECULAR WEIGHT WATER (KG/MOL)
+   REAL, PARAMETER, PRIVATE :: OSM  = 1           ! OSMOTIC COEFFICIENT
+   REAL, PARAMETER, PRIVATE :: VI   = 3           ! NUMBER OF ION DISSOCIATED IN SOLUTION
+   REAL, PARAMETER, PRIVATE :: EPSM = 0.7         ! AEROSOL SOLUBLE FRACTION
+   REAL, PARAMETER, PRIVATE :: RHOA = 1777        ! AEROSOL BULK DENSITY (KG/M3)
+   REAL, PARAMETER, PRIVATE :: MAP  = 0.132       ! MOLECULAR WEIGHT AEROSOL (KG/MOL)
+   REAL, PARAMETER, PRIVATE :: MA   = 0.0284      ! MOLECULAR WEIGHT OF 'AIR' (KG/MOL)
+   REAL, PARAMETER, PRIVATE :: RR   = 8.3145      ! UNIVERSAL GAS CONSTANT
+   REAL, PRIVATE ::      BACT    ! ACTIVATION PARAMETER
+   REAL, PARAMETER, PRIVATE :: RM1  = 0.052E-6    ! GEOMETRIC MEAN RADIUS, MODE 1 (M)
+   REAL, PARAMETER, PRIVATE :: RM2  = 1.3E-6      ! GEOMETRIC MEAN RADIUS, MODE 2 (M)
+   REAL, PARAMETER, PRIVATE :: NANEW1 = 72.2E6    ! TOTAL AEROSOL CONCENTRATION, MODE 1 (M^-3)
+   REAL, PARAMETER, PRIVATE :: NANEW2 = 1.8E6     ! TOTAL AEROSOL CONCENTRATION, MODE 2 (M^-3)
+   REAL, PARAMETER, PRIVATE :: SIG1   = 2.04      ! STANDARD DEVIATION OF AEROSOL S.D., MODE 1
+   REAL, PARAMETER, PRIVATE :: SIG2   = 2.50      ! STANDARD DEVIATION OF AEROSOL S.D., MODE 2
+   REAL, PRIVATE ::      F11     ! CORRECTION FACTOR FOR ACTIVATION, MODE 1
+   REAL, PRIVATE ::      F12     ! CORRECTION FACTOR FOR ACTIVATION, MODE 1
+   REAL, PRIVATE ::      F21     ! CORRECTION FACTOR FOR ACTIVATION, MODE 2
+   REAL, PRIVATE ::      F22     ! CORRECTION FACTOR FOR ACTIVATION, MODE 2
+
+
+
+ 
 !
    REAL, SAVE ::                                           &
              qc0,qck1,pidnc,bvtr1,bvtr2,bvtr3,bvtr4,bvtr5, &
@@ -81,7 +106,7 @@ CONTAINS
   SUBROUTINE wdm6(th, q, qc, qr, qi, qs, qg,               &
                     nn, nc, nr,                            &
                     den, pii, p, delz,                     &
-                    delt,g, cpd, cpv, ccn0, rd, rv, t0c,   &
+                    delt,g, cpd, cpv, ccn0, w, rd, rv, t0c,   &
                     ep1, ep2, qmin,                        &
                     XLS, XLV0, XLF0, den0, denr,           &
                     cliq,cice,psat,                        &
@@ -183,6 +208,7 @@ CONTAINS
                                                              cpd, &
                                                              cpv, &
                                                             ccn0, &
+                                                               w, &
                                                              ep1, &
                                                              ep2, &
                                                             qmin, &
@@ -300,7 +326,7 @@ CONTAINS
                                                          qlq2s2d
 !----------------------------------------------------------------
 ! LOCAL VAR
-  REAL, DIMENSION( its:ite , kts:kte ) ::   t
+  REAL, DIMENSION( its:ite , kts:kte ) ::   t,w2d
   REAL, DIMENSION( its:ite , kts:kte, 2 ) ::   qci
   REAL, DIMENSION( its:ite , kts:kte, 3 ) ::   qrs, ncr
   INTEGER ::               i,j,k
@@ -316,11 +342,29 @@ CONTAINS
   REAL, DIMENSION( kts:kte ) :: qi1d
   REAL, DIMENSION( kts:kte ) :: re_qc, re_qi, re_qs
 
+!--------------------------------------------------------------
+      ! AEROSOL ACTIVATION PARAMETERS FOR IACT = 2
+      ! PARAMETERS CURRENTLY SET FOR AMMONIUM SULFATE
+        BACT = VI*OSM*EPSM*MW*RHOA/(MAP*denr)
+! AEROSOL SIZE DISTRIBUTION PARAMETERS CURRENTLY SET FOR MPACE
+! (see morrison et al. 2007, JGR)
+! MODE 1
+         F11 = 0.5*EXP(2.5*(LOG(SIG1))**2) !(28)
+         F21 = 1.+0.25*LOG(SIG1) !(29)
+
+! MODE 2
+         F12 = 0.5*EXP(2.5*(LOG(SIG2))**2)
+         F22 = 1.+0.25*LOG(SIG2)
+!--------------------------------------------------------------
+
+
+
       IF (itimestep .eq. 1) THEN 
         DO j=jms,jme
            DO k=kms,kme    
            DO i=ims,ime
-              nn(i,k,j) = ccn0  
+              !nn(i,k,j) = ccn0  
+              nn(i,k,j) = (NANEW1+NANEW2)/den(i,k,j) !!! 
               qccon2(i,k,j) = 0.0 
               qcevp2(i,k,j) = 0.0 
               qcact2(i,k,j) = 0.0 
@@ -359,7 +403,8 @@ CONTAINS
             ncr(i,k,1) = nn(i,k,j)
             ncr(i,k,2) = nc(i,k,j)
             ncr(i,k,3) = nr(i,k,j)  
-           !Li-Hsin Chen, 2019   
+           !Li-Hsin Chen, 2019
+            w2d(i,k) = w(i,k,j)   
             qccon2d(i,k,2) = qccon2(i,k,j) 
             qcevp2d(i,k,2) = qcevp2(i,k,j) 
             qcact2d(i,k,2) = qcact2(i,k,j) 
@@ -384,7 +429,7 @@ CONTAINS
          ENDDO
          !  Sending array starting locations of optional variables may cause
          !  troubles, so we explicitly change the call.
-         CALL wdm62D(t, q(ims,kms,j), qci, qrs, ncr               &
+         CALL wdm62D(t, q(ims,kms,j), qci, qrs, ncr, w2d          &
                     ,den(ims,kms,j)                               &
                     ,p(ims,kms,j), delz(ims,kms,j)                &
                     ,delt,g, cpd, cpv, ccn0, rd, rv, t0c          &
@@ -515,7 +560,7 @@ CONTAINS
   END SUBROUTINE wdm6
 !===================================================================
 !
-  SUBROUTINE wdm62D(t, q, qci, qrs, ncr, den, p, delz             &
+  SUBROUTINE wdm62D(t, q, qci, qrs, ncr, w, den, p, delz             &
                    ,delt,g, cpd, cpv, ccn0, rd, rv, t0c           &
                    ,ep1, ep2, qmin                                &
                    ,XLS, XLV0, XLF0, den0, denr                   &
@@ -545,7 +590,7 @@ CONTAINS
                                       lat
   REAL, DIMENSION( its:ite , kts:kte ),                           &
         INTENT(INOUT) ::                                          &
-                                                               t
+                                                               t,w
   REAL, DIMENSION( its:ite , kts:kte, 2 ),                        &
         INTENT(INOUT) ::                                          &
                                                              qci
@@ -608,7 +653,7 @@ CONTAINS
         rh, qs, rslope, rslope2, rslope3, rslopeb,                &
         falk, fall, work1, qrs_tmp
   REAL, DIMENSION( its:ite , kts:kte ) ::                         & 
-        rslopec, rslopec2,rslopec3 
+        rslopec, rslopec2,rslopec3, evs 
   REAL, DIMENSION( its:ite , kts:kte,  2) ::                      &
         avedia 
   REAL, DIMENSION( its:ite , kts:kte ) ::                         &
@@ -635,7 +680,8 @@ CONTAINS
   REAL, DIMENSION( its:ite , kts:kte ) ::                         &
         pigen, pidep, pcond, pgevp, psmlt, psevp,                 &
         xl, cpm, work2, denfac, n0sfac, qsum,                     &
-        denqrs1, denqr1, denqrs2, denqrs3, denncr3, denqci, xni 
+        denqrs1, denqr1, denqrs2, denqrs3, denncr3, denqci, xni,  &
+        dv,kap    
   REAL, DIMENSION( its:ite ) ::                                   &
         delqrs1, delqrs2, delqrs3, delncr3, delqi
   REAL, DIMENSION( its:ite ) :: tstepsnow, tstepgraup
@@ -667,6 +713,12 @@ CONTAINS
             iprt, latd, lond, loop, loops, ifsat, n, idim, kdim
 ! Temporaries used for inlining fpvs function
   REAL  :: dldti, xb, xai, tr, xbi, xa, hvap, cvap, hsub, dldt, ttp
+! WORKING PARAMETERS FOR AEROSOL ACTIVATION (adopted by morr.)
+  REAL AACT,GAMM,GG,PSI,ETA1,ETA2,SM1,SM2,SMAX,UU1,UU2,ALPHA,dum &
+      &,DUM1,DUM2
+  real, parameter :: pi = 3.1415926536 
+  integer :: iact
+  
 !
 !=================================================================
 !   compute internal functions
@@ -719,6 +771,8 @@ CONTAINS
         do i = its, ite
           cpm(i,k) = cpmcal(q(i,k))
           xl(i,k) = xlcal(t(i,k))
+          dv(i,k) = diffus(t(i,k),p(i,k)) ! Li-Hsin
+          kap(i,k) = xka(t(i,k),p(i,k))
         enddo
       enddo
       do k = kts, kte
@@ -783,9 +837,10 @@ CONTAINS
       do k = kts, kte
         do i = its, ite
           tr=ttp/t(i,k)
-          qs(i,k,1)=psat*exp(log(tr)*(xa))*exp(xb*(1.-tr))
+          qs(i,k,1)=psat*exp(log(tr)*(xa))*exp(xb*(1.-tr)) !e
           qs(i,k,1) = min(qs(i,k,1),0.99*p(i,k))
-          qs(i,k,1) = ep2 * qs(i,k,1) / (p(i,k) - qs(i,k,1))
+          evs(i,k) = qs(i,k,1) ! Li-Hsin
+          qs(i,k,1) = ep2 * qs(i,k,1) / (p(i,k) - qs(i,k,1)) !ep2*e/p
           qs(i,k,1) = max(qs(i,k,1),qmin)
           rh(i,k,1) = max(q(i,k) / qs(i,k,1),qmin)
           tr=ttp/t(i,k)
@@ -2094,6 +2149,8 @@ CONTAINS
 ! pcact: QV -> QC                                 [LH 8]  [KK 14]
 ! ncact: NCCN -> NC                               [LH A2] [KK 12]
 !---------------------------------------------------------------
+       iact = 2
+       if (iact .eq. 1) then 
           if(rh(i,k,1).gt.1.) then
             ncact(i,k) = max(0.,((ncr(i,k,1)+ncr(i,k,2))                       &
                        *min(1.,(rh(i,k,1)/satmax)**actk) - ncr(i,k,2)))/dtcld
@@ -2114,6 +2171,56 @@ CONTAINS
             ncr(i,k,2) = max(ncr(i,k,2)+ncact(i,k)*dtcld,0.)
             t(i,k) = t(i,k)+pcact(i,k)*xl(i,k)/cpm(i,k)*dtcld
           endif  
+       else
+          dum = w(i,k)
+          dum = max(dum,0.10)
+         ! ONLY ACTIVATE IN REGIONS OF UPWARD MOTION
+          if (dum.ge. 0.001) then
+             SIGVL = 0.0761-1.55E-4*(t(i,k)-273.15)
+             AACT = 2.*MW/(denr*RR)*SIGVL/t(i,k)
+             ALPHA = g*MW*xl(i,k)/(cpm(i,k)*RR*t(i,k)**2)-g*MA/(RR*t(i,k))
+             GAMM = RR*t(i,k)/(evs(i,k)*MW)+MW*xl(i,k)**2/(cpm(i,k)*p(i,k)*MA*t(i,k))
+
+             GG=1./(denr*RR*t(i,k)/(evs(i,k)*dv(i,k)*MW)+xl(i,k)*denr/(kap(i,k)*t(i,k))*(xl(i,k)*MW/ &
+                 (t(i,k)*RR)-1.)) !(16)
+
+             PSI = 2./3.*(ALPHA*dum/GG)**0.5*AACT !(23)
+
+             ETA1 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NANEW1) !(22)
+             ETA2 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NANEW2)
+
+             SM1 = 2./BACT**0.5*(AACT/(3.*RM1))**1.5 !(8)
+             SM2 = 2./BACT**0.5*(AACT/(3.*RM2))**1.5
+            !(27)
+             DUM1=1./SM1**2*(F11*(PSI/ETA1)**1.5+F21*(SM1**2/(ETA1+3.*PSI))**0.75)
+             DUM2=1./SM2**2*(F12*(PSI/ETA2)**1.5+F22*(SM2**2/(ETA2+3.*PSI))**0.75)
+
+             SMAX = 1./(DUM1+DUM2)**0.5 !(6) 2000
+   
+             UU1 = 2.*LOG(SM1/SMAX)/(4.242*LOG(SIG1)) !(9)
+             UU2 = 2.*LOG(SM2/SMAX)/(4.242*LOG(SIG2))
+             DUM1 = NANEW1/2.*(1.-DERF1(UU1)) !(2) Von der Emde and Wacker 1993
+             DUM2 = NANEW2/2.*(1.-DERF1(UU2))
+
+             DUM2 = (DUM1+DUM2)/den(i,k)  !CONVERT TO KG-1
+   
+             ! MAKE SURE THIS VALUE ISN'T GREATER THAN TOTAL NUMBER OF AEROSOL
+             DUM2 = MIN((NANEW1+NANEW2)/den(i,k),DUM2)
+
+             DUM2 = (DUM2-ncr(i,k,2)/dtcld !ncact
+             DUM2 = MAX(0.,DUM2)
+             pcact(i,k) = min(4.*pi*denr*(actr*1.E-6)**3*DUM2/            &
+                         (3.*den(i,k)),max(q(i,k),0.)/dtcld)
+
+             ncr(i,k,1) = max(ncr(i,k,1)-DUM2*dtcld,0.)
+             ncr(i,k,2) = max(ncr(i,k,2)+DUM2*dtcld,0.)
+             q(i,k) = max(q(i,k)-pcact(i,k)*dtcld,0.)
+             qci(i,k,1) = max(qci(i,k,1)+pcact(i,k)*dtcld,0.)
+             t(i,k) = t(i,k)+pcact(i,k)*xl(i,k)/cpm(i,k)*dtcld
+
+          end if 
+      
+       end if !iact
 !---------------------------------------------------------------
 !  pcond:condensational/evaporational rate of cloud water [HL A46] [RH83 A6]
 !     if there exists additional water vapor condensated/if
@@ -3111,7 +3218,122 @@ CONTAINS
       enddo i_loop
 !
   END SUBROUTINE nislfv_rain_plm6
-
+!-------------------------------------------------------------------
+      REAL FUNCTION DERF1(X)
+      IMPLICIT NONE
+      REAL X
+      REAL, DIMENSION(0 : 64) :: A, B
+      REAL W,T,Y
+      INTEGER K,I
+      DATA A/                                                 &
+         0.00000000005958930743E0, -0.00000000113739022964E0, &
+         0.00000001466005199839E0, -0.00000016350354461960E0, &
+         0.00000164610044809620E0, -0.00001492559551950604E0, &
+         0.00012055331122299265E0, -0.00085483269811296660E0, &
+         0.00522397762482322257E0, -0.02686617064507733420E0, &
+         0.11283791670954881569E0, -0.37612638903183748117E0, &
+         1.12837916709551257377E0,                                &
+         0.00000000002372510631E0, -0.00000000045493253732E0, &
+         0.00000000590362766598E0, -0.00000006642090827576E0, &
+         0.00000067595634268133E0, -0.00000621188515924000E0, &
+         0.00005103883009709690E0, -0.00037015410692956173E0, &
+         0.00233307631218880978E0, -0.01254988477182192210E0, &
+         0.05657061146827041994E0, -0.21379664776456006580E0, &
+         0.84270079294971486929E0,
+&
+         0.00000000000949905026E0, -0.00000000018310229805E0, &
+         0.00000000239463074000E0, -0.00000002721444369609E0, &
+         0.00000028045522331686E0, -0.00000261830022482897E0, &
+         0.00002195455056768781E0, -0.00016358986921372656E0, &
+         0.00107052153564110318E0, -0.00608284718113590151E0, &
+         0.02986978465246258244E0, -0.13055593046562267625E0, &
+         0.67493323603965504676E0,
+&
+         0.00000000000382722073E0, -0.00000000007421598602E0, &
+         0.00000000097930574080E0, -0.00000001126008898854E0, &
+         0.00000011775134830784E0, -0.00000111992758382650E0, &
+         0.00000962023443095201E0, -0.00007404402135070773E0, &
+         0.00050689993654144881E0, -0.00307553051439272889E0, &
+         0.01668977892553165586E0, -0.08548534594781312114E0, &
+         0.56909076642393639985E0,
+&
+         0.00000000000155296588E0, -0.00000000003032205868E0, &
+         0.00000000040424830707E0, -0.00000000471135111493E0, &
+         0.00000005011915876293E0, -0.00000048722516178974E0, &
+         0.00000430683284629395E0, -0.00003445026145385764E0, &
+         0.00024879276133931664E0, -0.00162940941748079288E0, &
+         0.00988786373932350462E0, -0.05962426839442303805E0, &
+         0.49766113250947636708E0 /
+      DATA (B(I), I = 0, 12) /                                  &
+         -0.00000000029734388465E0,  0.00000000269776334046E0,  &
+         -0.00000000640788827665E0, -0.00000001667820132100E0,  &
+         -0.00000021854388148686E0,  0.00000266246030457984E0,  &
+          0.00001612722157047886E0, -0.00025616361025506629E0,  &
+          0.00015380842432375365E0,  0.00815533022524927908E0,  &
+         -0.01402283663896319337E0, -0.19746892495383021487E0,  &
+          0.71511720328842845913E0 /
+      DATA (B(I), I = 13, 25) /                                 &
+         -0.00000000001951073787E0, -0.00000000032302692214E0,  &
+          0.00000000522461866919E0,  0.00000000342940918551E0,  &
+         -0.00000035772874310272E0,  0.00000019999935792654E0,  &
+          0.00002687044575042908E0, -0.00011843240273775776E0,  &
+         -0.00080991728956032271E0,  0.00661062970502241174E0,  &
+          0.00909530922354827295E0, -0.20160072778491013140E0,  &
+          0.51169696718727644908E0 /
+      DATA (B(I), I = 26, 38) /                                 &
+         0.00000000003147682272E0, -0.00000000048465972408E0,   &
+         0.00000000063675740242E0,  0.00000003377623323271E0,   &
+        -0.00000015451139637086E0, -0.00000203340624738438E0,   &
+         0.00001947204525295057E0,  0.00002854147231653228E0,   &
+        -0.00101565063152200272E0,  0.00271187003520095655E0,   &
+         0.02328095035422810727E0, -0.16725021123116877197E0,   &
+         0.32490054966649436974E0 /
+      DATA (B(I), I = 39, 51) /                                 &
+         0.00000000002319363370E0, -0.00000000006303206648E0,   &
+        -0.00000000264888267434E0,  0.00000002050708040581E0,   &
+         0.00000011371857327578E0, -0.00000211211337219663E0,   &
+         0.00000368797328322935E0,  0.00009823686253424796E0,   &
+        -0.00065860243990455368E0, -0.00075285814895230877E0,   &
+         0.02585434424202960464E0, -0.11637092784486193258E0,   &
+         0.18267336775296612024E0 /
+      DATA (B(I), I = 52, 64) /                                 &
+        -0.00000000000367789363E0,  0.00000000020876046746E0,   &
+        -0.00000000193319027226E0, -0.00000000435953392472E0,   &
+         0.00000018006992266137E0, -0.00000078441223763969E0,   &
+        -0.00000675407647949153E0,  0.00008428418334440096E0,   &
+        -0.00017604388937031815E0, -0.00239729611435071610E0,   &
+         0.02064129023876022970E0, -0.06905562880005864105E0,   &
+         0.09084526782065478489E0 /
+      W = ABS(X)
+      IF (W .LT. 2.2D0) THEN
+          T = W * W
+          K = INT(T)
+          T = T - K
+          K = K * 13
+          Y = ((((((((((((A(K) * T + A(K + 1)) * T +              &
+              A(K + 2)) * T + A(K + 3)) * T + A(K + 4)) * T +     &
+              A(K + 5)) * T + A(K + 6)) * T + A(K + 7)) * T +     &
+              A(K + 8)) * T + A(K + 9)) * T + A(K + 10)) * T +    &
+              A(K + 11)) * T + A(K + 12)) * W
+      ELSE IF (W .LT. 6.9D0) THEN
+          K = INT(W)
+          T = W - K
+          K = 13 * (K - 2)
+          Y = (((((((((((B(K) * T + B(K + 1)) * T +               &
+              B(K + 2)) * T + B(K + 3)) * T + B(K + 4)) * T +     &
+              B(K + 5)) * T + B(K + 6)) * T + B(K + 7)) * T +     &
+              B(K + 8)) * T + B(K + 9)) * T + B(K + 10)) * T +    &
+              B(K + 11)) * T + B(K + 12)
+          Y = Y * Y
+          Y = Y * Y
+          Y = Y * Y
+          Y = 1 - Y * Y
+      ELSE
+          Y = 1
+      END IF
+      IF (X .LT. 0) Y = -Y
+      DERF1 = Y
+      END FUNCTION DERF1
 !+---+-----------------------------------------------------------------+
       subroutine refl10cm_wdm6 (qv1d, qr1d, nr1d, qs1d, qg1d,           &
                        t1d, p1d, dBZ, kts, kte, ii, jj, lamr_op)
