@@ -715,7 +715,7 @@ CONTAINS
   REAL  :: dldti, xb, xai, tr, xbi, xa, hvap, cvap, hsub, dldt, ttp
 ! WORKING PARAMETERS FOR AEROSOL ACTIVATION (adopted by morr.)
   REAL AACT,GAMM,GG,PSI,ETA1,ETA2,SM1,SM2,SMAX,UU1,UU2,ALPHA,dum &
-      &,DUM1,DUM2,SIGVL
+      &,DUM1,DUM2,SIGVL,NEW_N1,NEW_N2
   real, parameter :: pi = 3.1415926536 
   integer :: iact
   
@@ -2186,7 +2186,10 @@ CONTAINS
 
              PSI = 2./3.*(ALPHA*dum/GG)**0.5*AACT !(23)
 
-             ETA1 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NANEW1) !(22)
+             !ETA1 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NANEW1) !(22)
+             !ETA2 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NANEW2)
+             NEW_N1 = max(ncr(i,k,1)*den(i,k)-NANEW2, NANEW1*1.E-3)
+             ETA1 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NEW_N1) !(22)
              ETA2 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NANEW2)
 
              SM1 = 2./BACT**0.5*(AACT/(3.*RM1))**1.5 !(8)
@@ -2199,13 +2202,16 @@ CONTAINS
    
              UU1 = 2.*LOG(SM1/SMAX)/(4.242*LOG(SIG1)) !(9)
              UU2 = 2.*LOG(SM2/SMAX)/(4.242*LOG(SIG2))
-             DUM1 = NANEW1/2.*(1.-DERF1(UU1)) !(2) Von der Emde and Wacker 1993
+             !DUM1 = NANEW1/2.*(1.-DERF1(UU1)) !(2) Von der Emde and Wacker 1993
+             !DUM2 = NANEW2/2.*(1.-DERF1(UU2))
+             DUM1 = NEW_N1/2.*(1.-DERF1(UU1)) !(2) Von der Emde and Wacker 1993
              DUM2 = NANEW2/2.*(1.-DERF1(UU2))
 
              DUM2 = (DUM1+DUM2)/den(i,k)  !CONVERT TO KG-1
    
              ! MAKE SURE THIS VALUE ISN'T GREATER THAN TOTAL NUMBER OF AEROSOL
-             DUM2 = MIN((NANEW1+NANEW2)/den(i,k),DUM2)
+             !DUM2 = MIN((NANEW1+NANEW2)/den(i,k),DUM2)
+             DUM2 = MIN(ncr(i,k,1),DUM2)
 
              DUM2 = (DUM2-ncr(i,k,2))/dtcld !ncact
              DUM2 = MAX(0.,DUM2)
