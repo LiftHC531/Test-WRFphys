@@ -363,8 +363,8 @@ CONTAINS
         DO j=jms,jme
            DO k=kms,kme    
            DO i=ims,ime
-              !nn(i,k,j) = ccn0  
-              nn(i,k,j) = (NANEW1+NANEW2)/den(i,k,j) !!! 
+              !nn(i,k,j) = ccn0 !m-3 
+              nn(i,k,j) = (NANEW1+NANEW2) 
               qccon2(i,k,j) = 0.0 
               qcevp2(i,k,j) = 0.0 
               qcact2(i,k,j) = 0.0 
@@ -505,6 +505,19 @@ CONTAINS
             qgevp2(i,k,j) = qgevp2d(i,k) 
          ENDDO
          ENDDO
+         if (.false.) then
+         IF (mod(itimestep-180*21,11).eq.0.and.itimestep.ge.180*21 &
+            .and. itimestep.le.180*21+11*34) THEN   !0330
+            IF (j.ge.33.and.j.le.35.and.ide.eq.151) THEN !32 34 |24 26
+               DO k = kts+9+1,kts+18+1
+                 DO i = 67,69  !74 76 |59 61
+                    !ncr(i,k,1)  = ncr(i,k,1) + 1.e10 
+                    nn(i,k,j)  = nn(i,k,j) + 1.e10 
+                 ENDDO
+               ENDDO
+            ENDIF
+         ENDIF
+         end if
          
 !+---+-----------------------------------------------------------------+
          IF ( PRESENT (diagflag) ) THEN
@@ -2147,7 +2160,7 @@ CONTAINS
 !---------------------------------------------------------------
 ! rate of change of cloud drop concentration due to CCN activation
 ! pcact: QV -> QC                                 [LH 8]  [KK 14]
-! ncact: NCCN -> NC                               [LH A2] [KK 12]
+! ncact: NCCN -> NC m-3 s-1                       [LH A2] [KK 12]
 !---------------------------------------------------------------
        iact = 2
        if (iact .eq. 1) then 
@@ -2188,7 +2201,7 @@ CONTAINS
 
              !ETA1 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NANEW1) !(22)
              !ETA2 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NANEW2)
-             NEW_N1 = max(ncr(i,k,1)*den(i,k)-NANEW2, NANEW1*1.E-3)
+             NEW_N1 = max(ncr(i,k,1)-NANEW2, 0.)
              ETA1 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NEW_N1) !(22)
              ETA2 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NANEW2)
 
@@ -2207,24 +2220,31 @@ CONTAINS
              DUM1 = NEW_N1/2.*(1.-DERF1(UU1)) !(2) Von der Emde and Wacker 1993
              DUM2 = NANEW2/2.*(1.-DERF1(UU2))
 
-             DUM2 = (DUM1+DUM2)/den(i,k)  !CONVERT TO KG-1
+             DUM2 = (DUM1+DUM2)!/den(i,k)  !CONVERT TO KG-1
    
              ! MAKE SURE THIS VALUE ISN'T GREATER THAN TOTAL NUMBER OF AEROSOL
-             !DUM2 = MIN((NANEW1+NANEW2)/den(i,k),DUM2)
-             DUM2 = MIN(ncr(i,k,1),DUM2)
+             !DUM2 = MIN((NANEW1+NANEW2),DUM2)
+             DUM2 = MIN(ncr(i,k,1),DUM2) !M-3
 
-             DUM2 = (DUM2-ncr(i,k,2))/dtcld !ncact
-             DUM2 = MAX(0.,DUM2)
-             pcact(i,k) = min(4.*pi*denr*(actr*1.E-6)**3*DUM2/            &
+             ncact(i,k) = max((DUM2-ncr(i,k,2))/dtcld,0.) 
+             pcact(i,k) = min(4.*pi*denr*(actr*1.E-6)**3*ncact(i,k)/            &
                          (3.*den(i,k)),max(q(i,k),0.)/dtcld)
+           !---Li-Hsin Chen, 2019--- Heating rate
+            qcact_rt(i,k,1)=max(pcact(i,k),0)*xl(i,k)/cpm(i,k)!*dtcld
+            if (q(i,k)-pcact(i,k)*dtcld.gt.0.) then
+               qcact_rt(i,k,2) = qcact_rt(i,k,2) + max(pcact(i,k),0)*dtcld
+            else
+               qcact_rt(i,k,2) = qcact_rt(i,k,2) + q(i,k)
+            end if
+           !---------------------------------------------------
 
-             ncr(i,k,1) = max(ncr(i,k,1)-DUM2*dtcld,0.)
-             ncr(i,k,2) = max(ncr(i,k,2)+DUM2*dtcld,0.)
+             ncr(i,k,1) = max(ncr(i,k,1)-ncact(i,k)*dtcld,0.)
+             ncr(i,k,2) = max(ncr(i,k,2)+ncact(i,k)*dtcld,0.)
              q(i,k) = max(q(i,k)-pcact(i,k)*dtcld,0.)
              qci(i,k,1) = max(qci(i,k,1)+pcact(i,k)*dtcld,0.)
              t(i,k) = t(i,k)+pcact(i,k)*xl(i,k)/cpm(i,k)*dtcld
 
-          end if 
+          end if !dum vertical velocity 
       
        end if !iact
 !---------------------------------------------------------------
