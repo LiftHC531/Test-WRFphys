@@ -1085,8 +1085,6 @@ CONTAINS
                          +precs2*work2(i,k)*coeres)/den(i,k)                  
               psmlt(i,k) = min(max(psmlt(i,k)*dtcld/mstep(i),-qrs(i,k,2)     &
                          /mstep(i)),0.)
-              qrs(i,k,2) = qrs(i,k,2) + psmlt(i,k)
-              qrs(i,k,1) = qrs(i,k,1) - psmlt(i,k)
              !Li-Hsin Chen, 2019---------
               qsmlt_rt(i,k,2) = qsmlt_rt(i,k,2) + psmlt(i,k)
 !-------------------------------------------------------------------
@@ -1097,6 +1095,9 @@ CONTAINS
                 sfac = rslope(i,k,2)*n0s*n0sfac(i,k)/qrs(i,k,2)
                 ncr(i,k,3) = ncr(i,k,3) - sfac*psmlt(i,k)
               endif
+             !error correction based on Lei et al., (JGR, 2020)
+              qrs(i,k,2) = qrs(i,k,2) + psmlt(i,k)
+              qrs(i,k,1) = qrs(i,k,1) - psmlt(i,k)
               t(i,k) = t(i,k) + xlf/cpm(i,k)*psmlt(i,k)
              !---Li-Hsin Chen, 2019--- Heating rate (psmlt<0, colder)
               qsmlt_rt(i,k,1) = min(psmlt(i,k),0.)*xlf/cpm(i,k)/dtcld
@@ -1112,8 +1113,6 @@ CONTAINS
                            /den(i,k)                                          
               pgmlt(i,k) = min(max(pgmlt(i,k)*dtcld/mstep(i),                &
                           -qrs(i,k,3)/mstep(i)),0.)
-              qrs(i,k,3) = qrs(i,k,3) + pgmlt(i,k)
-              qrs(i,k,1) = qrs(i,k,1) - pgmlt(i,k)
              !Li-Hsin Chen, 2019---------
               qgmlt_rt(i,k,2) = qgmlt_rt(i,k,2) + pgmlt(i,k)
 !-------------------------------------------------------------------
@@ -1124,6 +1123,9 @@ CONTAINS
                 gfac = rslope(i,k,3)*n0g/qrs(i,k,3)
                 ncr(i,k,3) = ncr(i,k,3) - gfac*pgmlt(i,k)
               endif
+             !error correction based on Lei et al., (JGR, 2020)
+              qrs(i,k,3) = qrs(i,k,3) + pgmlt(i,k)
+              qrs(i,k,1) = qrs(i,k,1) - pgmlt(i,k)
               t(i,k) = t(i,k) + xlf/cpm(i,k)*pgmlt(i,k)
              !---Li-Hsin Chen, 2019--- Heating rate (pgmlt<0, colder)
               qgmlt_rt(i,k,1) = min(pgmlt(i,k),0.)*xlf/cpm(i,k)/dtcld
@@ -1510,6 +1512,8 @@ CONTAINS
 !-------------------------------------------------------------
               acrfac = 6.*rslope2(i,k,1)+4.*diameter*rslope(i,k,1) + diameter**2
               praci(i,k) = pi*qci(i,k,2)*ncr(i,k,3)*abs(vt2r-vt2i)*acrfac/4.
+           ! reduce collection efficiency (suggested by B. Wilt)
+              praci(i,k) = praci(i,k)*min(max(0.0,qrs(i,k,1)/qci(i,k,2)),1.)**2
               praci(i,k) = min(praci(i,k),qci(i,k,2)/dtcld)
 !-------------------------------------------------------------
 ! piacr: Accretion of rain by cloud ice [HL A19] [LFO 26]
@@ -1518,6 +1522,8 @@ CONTAINS
               piacr(i,k) = pi*pi*avtr*ncr(i,k,3)*denr*xni(i,k)*denfac(i,k)     &
                           *g7pbr*rslope3(i,k,1)*rslope2(i,k,1)*rslopeb(i,k,1)  &
                           /24./den(i,k)
+           ! reduce collection efficiency (suggested by B. Wilt)
+              piacr(i,k) = piacr(i,k)*min(max(0.0,qci(i,k,2)/qrs(i,k,1)),1.)**2
               piacr(i,k) = min(piacr(i,k),qrs(i,k,1)/dtcld)
             endif
 !-------------------------------------------------------------
@@ -1527,6 +1533,8 @@ CONTAINS
             if(ncr(i,k,3).gt.nrmin) then
               niacr(i,k) = pi*avtr*ncr(i,k,3)*xni(i,k)*denfac(i,k)*g4pbr       &
                           *rslope2(i,k,1)*rslopeb(i,k,1)/4.
+           ! reduce collection efficiency (suggested by B. Wilt)
+              niacr(i,k) = niacr(i,k)*min(max(0.0,qci(i,k,2)/qrs(i,k,1)),1.)**2
               niacr(i,k) = min(niacr(i,k),ncr(i,k,3)/dtcld)
             endif
 !-------------------------------------------------------------
@@ -1558,6 +1566,8 @@ CONTAINS
 !-------------------------------------------------------------
           if(qrs(i,k,2).gt.qcrmin .and. qci(i,k,1).gt.qmin) then
             psacw(i,k) = min(pacrc*n0sfac(i,k)*rslope3(i,k,2)*rslopeb(i,k,2)   &
+              ! reduce collection efficiency (suggested by B. Wilt)
+                        *min(max(0.0,qrs(i,k,2)/qci(i,k,1)),1.)**2             &
                         *qci(i,k,1)*denfac(i,k),qci(i,k,1)/dtcld)
           endif
 !-------------------------------------------------------------
@@ -1566,6 +1576,8 @@ CONTAINS
 !-------------------------------------------------------------
          if(qrs(i,k,2).gt.qcrmin .and. ncr(i,k,2).gt.ncmin) then
            nsacw(i,k) = min(pacrc*n0sfac(i,k)*rslope3(i,k,2)*rslopeb(i,k,2)    &
+             ! reduce collection efficiency (suggested by B. Wilt)
+                       *min(max(0.0,qrs(i,k,2)/qci(i,k,1)),1.)**2              &
                        *ncr(i,k,2)*denfac(i,k),ncr(i,k,2)/dtcld)
          endif
 !-------------------------------------------------------------
@@ -1574,6 +1586,8 @@ CONTAINS
 !-------------------------------------------------------------
           if(qrs(i,k,3).gt.qcrmin .and. qci(i,k,1).gt.qmin) then
             pgacw(i,k) = min(pacrg*rslope3(i,k,3)*rslopeb(i,k,3)*qci(i,k,1)    &
+              ! reduce collection efficiency (suggested by B. Wilt)
+                        *min(max(0.0,qrs(i,k,3)/qci(i,k,1)),1.)**2         
                         *denfac(i,k),qci(i,k,1)/dtcld)
           endif
 !-------------------------------------------------------------
@@ -1582,6 +1596,8 @@ CONTAINS
 !-------------------------------------------------------------
           if(qrs(i,k,3).gt.qcrmin .and. ncr(i,k,2).gt.ncmin) then
             ngacw(i,k) = min(pacrg*rslope3(i,k,3)*rslopeb(i,k,3)*ncr(i,k,2)    &
+              ! reduce collection efficiency (suggested by B. Wilt)
+                        *min(max(0.0,qrs(i,k,3)/qci(i,k,1)),1.)**2             &
                         *denfac(i,k),ncr(i,k,2)/dtcld)
           endif
 !-------------------------------------------------------------
@@ -1607,6 +1623,8 @@ CONTAINS
                       + 1.5*rslope2(i,k,2)*rslope2(i,k,2)*rslope2(i,k,1)
               pracs(i,k) = pi*pi*ncr(i,k,3)*n0s*n0sfac(i,k)*abs(vt2r-vt2ave)   &
                           *(dens/den(i,k))*acrfac
+              ! reduce collection efficiency (suggested by B. Wilt)
+              pracs(i,k) = pracs(i,k)*min(max(0.0,qrs(i,k,1)/qrs(i,k,2)),1.)**2
               pracs(i,k) = min(pracs(i,k),qrs(i,k,2)/dtcld)
             endif
 !-------------------------------------------------------------
@@ -1618,6 +1636,8 @@ CONTAINS
                      + 2.*rslope3(i,k,1)*rslope3(i,k,2)
             psacr(i,k) = pi*pi*ncr(i,k,3)*n0s*n0sfac(i,k)*abs(vt2ave-vt2r)     &
                         *(denr/den(i,k))*acrfac
+            ! reduce collection efficiency (suggested by B. Wilt)
+            psacr(i,k) = psacr(i,k)*min(max(0.0,qrs(i,k,2)/qrs(i,k,1)),1.)**2
             psacr(i,k) = min(psacr(i,k),qrs(i,k,1)/dtcld)
           endif
           if(qrs(i,k,2).gt.qcrmin .and. ncr(i,k,3).gt.nrmin) then
@@ -1629,6 +1649,8 @@ CONTAINS
                     + 1.0*rslope(i,k,1)*rslope2(i,k,2)+.5*rslope3(i,k,2)        
             nsacr(i,k) = pi*ncr(i,k,3)*n0s*n0sfac(i,k)*abs(vt2ave-vt2r)        &
                         *acrfac
+            ! reduce collection efficiency (suggested by B. Wilt)
+            nsacr(i,k) = nsacr(i,k)*min(max(0.0,qrs(i,k,2)/qrs(i,k,1)),1.)**2
             nsacr(i,k) = min(nsacr(i,k),ncr(i,k,3)/dtcld)
           endif
 !-------------------------------------------------------------
@@ -1641,6 +1663,8 @@ CONTAINS
                     + 2.*rslope3(i,k,1)*rslope3(i,k,3)
             pgacr(i,k) = pi*pi*ncr(i,k,3)*n0g*abs(vt2ave-vt2r)*(denr/den(i,k)) &
                         *acrfac
+            ! reduce collection efficiency (suggested by B. Wilt)
+            pgacr(i,k) = pgacr(i,k)*min(max(0.0,qrs(i,k,3)/qrs(i,k,1)),1.)**2
             pgacr(i,k) = min(pgacr(i,k),qrs(i,k,1)/dtcld)
           endif
 !-------------------------------------------------------------
@@ -1651,6 +1675,8 @@ CONTAINS
             acrfac = 1.5*rslope2(i,k,1)*rslope(i,k,3)                          &
                     + 1.0*rslope(i,k,1)*rslope2(i,k,3) + .5*rslope3(i,k,3)   
             ngacr(i,k) = pi*ncr(i,k,3)*n0g*abs(vt2ave-vt2r)*acrfac
+            ! reduce collection efficiency (suggested by B. Wilt)
+            ngacr(i,k) = ngacr(i,k)*min(max(0.0,qrs(i,k,3)/qrs(i,k,1)),1.)**2
             ngacr(i,k) = min(ngacr(i,k),ncr(i,k,3)/dtcld)
           endif
 !
