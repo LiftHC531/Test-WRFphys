@@ -78,7 +78,7 @@ MODULE module_mp_wdm6
    REAL, PRIVATE ::      F12     ! CORRECTION FACTOR FOR ACTIVATION, MODE 1
    REAL, PRIVATE ::      F21     ! CORRECTION FACTOR FOR ACTIVATION, MODE 2
    REAL, PRIVATE ::      F22     ! CORRECTION FACTOR FOR ACTIVATION, MODE 2
-
+   real, private :: nsmall = 1.e-16 !minium allowable prognostic variable from P3
 
 
  
@@ -363,8 +363,7 @@ CONTAINS
         DO j=jms,jme
            DO k=kms,kme    
            DO i=ims,ime
-              !nn(i,k,j) = ccn0 !m-3 
-              nn(i,k,j) = (NANEW1+NANEW2) 
+              nn(i,k,j) = ccn0 !(NANEW1+NANEW2)!m-3 
               qccon2(i,k,j) = 0.0 
               qcevp2(i,k,j) = 0.0 
               qcact2(i,k,j) = 0.0 
@@ -1587,7 +1586,7 @@ CONTAINS
           if(qrs(i,k,3).gt.qcrmin .and. qci(i,k,1).gt.qmin) then
             pgacw(i,k) = min(pacrg*rslope3(i,k,3)*rslopeb(i,k,3)*qci(i,k,1)    &
               ! reduce collection efficiency (suggested by B. Wilt)
-                        *min(max(0.0,qrs(i,k,3)/qci(i,k,1)),1.)**2         
+                        *min(max(0.0,qrs(i,k,3)/qci(i,k,1)),1.)**2             &
                         *denfac(i,k),qci(i,k,1)/dtcld)
           endif
 !-------------------------------------------------------------
@@ -2206,11 +2205,11 @@ CONTAINS
            !---------------------------------------------------
             q(i,k) = max(q(i,k)-pcact(i,k)*dtcld,0.)
             qci(i,k,1) = max(qci(i,k,1)+pcact(i,k)*dtcld,0.)
-            ncr(i,k,1) = max(ncr(i,k,1)-ncact(i,k)*dtcld,0.)
+            ncr(i,k,1) = max(ncr(i,k,1)-ncact(i,k)*dtcld,nsmall)
             ncr(i,k,2) = max(ncr(i,k,2)+ncact(i,k)*dtcld,0.)
             t(i,k) = t(i,k)+pcact(i,k)*xl(i,k)/cpm(i,k)*dtcld
           endif  
-       else
+       else if (iact .eq. 2) then
           dum = w(i,k)
           dum = max(dum,0.10)
          ! ONLY ACTIVATE IN REGIONS OF UPWARD MOTION
@@ -2227,30 +2226,28 @@ CONTAINS
 
              !ETA1 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NANEW1) !(22)
              !ETA2 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NANEW2)
-             NEW_N1 = max(ncr(i,k,1)-NANEW2, 0.)
-             ETA1 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NEW_N1) !(22)
-             ETA2 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*NANEW2)
+             ETA2 = (ALPHA*dum/GG)**1.5/(2.*pi*denr*GAMM*ncr(i,k,1)) 
 
-             SM1 = 2./BACT**0.5*(AACT/(3.*RM1))**1.5 !(8)
-             SM2 = 2./BACT**0.5*(AACT/(3.*RM2))**1.5
+             !SM1 = 2./BACT**0.5*(AACT/(3.*RM1))**1.5 !(8)
+             SM2 = 2./BACT**0.5*(AACT/(3.*RM2))**1.5 
             !(27)
-             DUM1=1./SM1**2*(F11*(PSI/ETA1)**1.5+F21*(SM1**2/(ETA1+3.*PSI))**0.75)
+             !DUM1=1./SM1**2*(F11*(PSI/ETA1)**1.5+F21*(SM1**2/(ETA1+3.*PSI))**0.75)
              DUM2=1./SM2**2*(F12*(PSI/ETA2)**1.5+F22*(SM2**2/(ETA2+3.*PSI))**0.75)
 
-             SMAX = 1./(DUM1+DUM2)**0.5 !(6) 2000
+             !SMAX = 1./(DUM1+DUM2)**0.5 !(6) 2000
+             SMAX = 1./max(DUM2,1.e-14)**0.5 
    
-             UU1 = 2.*LOG(SM1/SMAX)/(4.242*LOG(SIG1)) !(9)
+             !UU1 = 2.*LOG(SM1/SMAX)/(4.242*LOG(SIG1)) !(9)
              UU2 = 2.*LOG(SM2/SMAX)/(4.242*LOG(SIG2))
              !DUM1 = NANEW1/2.*(1.-DERF1(UU1)) !(2) Von der Emde and Wacker 1993
              !DUM2 = NANEW2/2.*(1.-DERF1(UU2))
-             DUM1 = NEW_N1/2.*(1.-DERF1(UU1)) !(2) Von der Emde and Wacker 1993
-             DUM2 = NANEW2/2.*(1.-DERF1(UU2))
+             DUM2 = ncr(i,k,1)/2.*(1.-DERF1(UU2))
 
-             DUM2 = (DUM1+DUM2)!/den(i,k)  !CONVERT TO KG-1
+             !DUM2 = (DUM1+DUM2)!/den(i,k)  !CONVERT TO KG-1
    
              ! MAKE SURE THIS VALUE ISN'T GREATER THAN TOTAL NUMBER OF AEROSOL
              !DUM2 = MIN((NANEW1+NANEW2),DUM2)
-             DUM2 = MIN(ncr(i,k,1),DUM2) !M-3
+             DUM2 = MIN(ncr(i,k,1),DUM2) !m-3
 
              ncact(i,k) = max((DUM2-ncr(i,k,2))/dtcld,0.) 
              pcact(i,k) = min(4.*pi*denr*(actr*1.E-6)**3*ncact(i,k)/            &
@@ -2264,7 +2261,7 @@ CONTAINS
             end if
            !---------------------------------------------------
 
-             ncr(i,k,1) = max(ncr(i,k,1)-ncact(i,k)*dtcld,0.)
+             ncr(i,k,1) = max(ncr(i,k,1)-ncact(i,k)*dtcld,nsmall)
              ncr(i,k,2) = max(ncr(i,k,2)+ncact(i,k)*dtcld,0.)
              q(i,k) = max(q(i,k)-pcact(i,k)*dtcld,0.)
              qci(i,k,1) = max(qci(i,k,1)+pcact(i,k)*dtcld,0.)
