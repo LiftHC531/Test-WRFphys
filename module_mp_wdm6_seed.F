@@ -5,14 +5,14 @@
 #  define VREC vrec
 #  define VSQRT vsqrt
 #endif
-MODULE module_mp_wdm6
+MODULE module_mp_wdm6_seed
 !
 !
    USE module_utility, ONLY: WRFU_Clock, WRFU_Alarm
    USE module_domain, ONLY : HISTORY_ALARM, Is_alarm_tstep
    USE module_mp_radar
 !
-   PRIVATE :: DERF1
+   PRIVATE :: DERF1,esw
    REAL, PARAMETER, PRIVATE :: dtcldcr     = 120. ! maximum time step for minor loops
    REAL, PARAMETER, PRIVATE :: n0r = 8.e6         ! intercept parameter rain
 !   REAL, PARAMETER, PRIVATE :: n0g = 4.e6         ! intercept parameter graupel ! RAS - now set in subroutine based on namelist option
@@ -59,6 +59,7 @@ MODULE module_mp_wdm6
    REAL, PARAMETER, PRIVATE :: di82    = 82.e-6   ! dimater related with raindrops evaporation
    REAL, PARAMETER, PRIVATE :: di15    = 15.e-6   ! auto conversion takes place beyond this diameter
 ! AEROSOL PARAMETERS FOR IACT = 2
+   REAL, PARAMETER, PRIVATE :: pi = 4.*atan(1.) 
    REAL, PARAMETER, PRIVATE :: MW   = 0.018       ! MOLECULAR WEIGHT WATER (KG/MOL)
    REAL, PARAMETER, PRIVATE :: OSM  = 1           ! OSMOTIC COEFFICIENT
    REAL, PARAMETER, PRIVATE :: VI   = 3           ! NUMBER OF ION DISSOCIATED IN SOLUTION
@@ -79,6 +80,14 @@ MODULE module_mp_wdm6
    REAL, PRIVATE ::      F21     ! CORRECTION FACTOR FOR ACTIVATION, MODE 2
    REAL, PRIVATE ::      F22     ! CORRECTION FACTOR FOR ACTIVATION, MODE 2
    real, private :: nsmall = 1.e-16 !minium allowable prognostic variable from P3
+!seeding bin
+  integer, parameter, private :: p_ff9i01=2,p_ff9i43=44
+  integer, parameter, private :: nkr = 43
+  real, parameter, private :: dlnr = log(2.0)/3.0
+  real, dimension(7,nkr), save, private :: r_hydro !radius
+  real, dimension(nkr), save, private :: mass_hydro !mass of liquid
+  integer, parameter, private :: kr_droplet = 14 ! cloud droplet: less than 40 micro m
+  
 
 
  
@@ -103,7 +112,7 @@ MODULE module_mp_wdm6
 CONTAINS
 !===================================================================
 !
-  SUBROUTINE wdm6(th, q, qc, qr, qi, qs, qg,               &
+  SUBROUTINE wd6s(th, q, qc, qr, qi, qs, qg,               &
                     nn, nc, nr,                            &
                     den, pii, p, delz,                     &
                     delt,g, cpd, cpv, ccn0, w, rd, rv, t0c,   &
@@ -130,7 +139,13 @@ CONTAINS
                    ,qaacw2,qaacw3,qrevp2,qrevp3,qgmlt2     &
                    ,qgeml2,qgfrz2,qiacr2,qsacr2,qgacr2     &
                    ,qsmlt2,qseml2,qgdep2,qgsub2,qgevp2     &
-                   ,qrain2 &
+                   ,qrain2,scalar,num_scalar                 & 
+                   !,sd01,sd02,sd03,sd04,sd05,sd06,sd07,sd08&
+                   !,sd09,sd10,sd11,sd12,sd13,sd14,sd15,sd16&
+                   !,sd17,sd18,sd19,sd20,sd21,sd22,sd23,sd24&
+                   !,sd25,sd26,sd27,sd28,sd29,sd30,sd31,sd32&
+                   !,sd33,sd34,sd35,sd36,sd37,sd38,sd39,sd40&
+                   !,sd41,sd42,sd43                         &
                                                            )
 !-------------------------------------------------------------------
   IMPLICIT NONE
@@ -180,7 +195,8 @@ CONTAINS
 !
   INTEGER,      INTENT(IN   )    ::   ids,ide, jds,jde, kds,kde , &
                                       ims,ime, jms,jme, kms,kme , &
-                                      its,ite, jts,jte, kts,kte
+                                      its,ite, jts,jte, kts,kte   &
+                                      ,num_scalar
   REAL, DIMENSION( ims:ime , kms:kme , jms:jme ),                 &
         INTENT(INOUT) ::                                          &
                                                               th, &
@@ -192,7 +208,14 @@ CONTAINS
                                                               qg, &
                                                               nn, & 
                                                               nc, &
-                                                              nr
+                                                              nr  !&
+  REAL, DIMENSION( ims:ime , kms:kme , jms:jme ) ::               &
+                          sd01,sd02,sd03,sd04,sd05,sd06,sd07,sd08&
+                          ,sd09,sd10,sd11,sd12,sd13,sd14,sd15,sd16&
+                          ,sd17,sd18,sd19,sd20,sd21,sd22,sd23,sd24&
+                          ,sd25,sd26,sd27,sd28,sd29,sd30,sd31,sd32&
+                          ,sd33,sd34,sd35,sd36,sd37,sd38,sd39,sd40&
+                          ,sd41,sd42,sd43                         
   REAL, DIMENSION( ims:ime , kms:kme , jms:jme ),                 &
         INTENT(IN   ) ::                                          &
                                                              den, &
@@ -342,6 +365,16 @@ CONTAINS
   REAL, DIMENSION( kts:kte ) :: qi1d
   REAL, DIMENSION( kts:kte ) :: re_qc, re_qi, re_qs
 
+!seeding bin
+  real, dimension(ims:ime,kms:kme,jms:jme) :: zcgs 
+  real z_full
+  real, dimension(ims:ime,kms:kme,jms:jme,num_scalar), intent(inout) :: scalar
+  integer :: krr, n
+  real, dimension(nkr,7) :: temp1 
+  real, dimension(its:ite,kts:kte,nkr) :: fccn
+  real, dimension(nkr) :: X_seed,seed_n,seed_rad 
+  
+
 !--------------------------------------------------------------
       ! AEROSOL ACTIVATION PARAMETERS FOR IACT = 2
       ! PARAMETERS CURRENTLY SET FOR AMMONIUM SULFATE
@@ -358,11 +391,47 @@ CONTAINS
 !--------------------------------------------------------------
 
 
+      do j=jms,jme
+         do i=ims,ime
+            z_full = 0.0
+            do k=kms,kme    
+               zcgs(i,k,j)=z_full+0.5*delz(i,k,j) !m
+               z_full=z_full+delz(i,k,j)
+            end do
+         end do
+      end do
 
       IF (itimestep .eq. 1) THEN 
+          open(unit=11,file="/home/mlhchen/GIT/Test-WRFphys/Test/bulkradii43.asc",status="old" &
+           &,action="read")
+          read(11,900) temp1 
+          close(11)
+          r_hydro = transpose(temp1) !radius: cm
+          r_hydro =    r_hydro * 1.0e-2  ! cm -> m
+          open(unit=11,file="/home/mlhchen/GIT/Test-WRFphys/Test/masses43.asc",status="old" &
+           &,action="read")
+          read(11,900) mass_hydro 
+          close(11)
+          mass_hydro = mass_hydro * 1.0e-3  ! g -> kg
+900   format(6e13.5)
+          open(unit=11,file="/home/mlhchen/GIT/Test-WRFphys/Test/cooper.asc" &
+          &,form="formatted",status="old",action="read")
+          do n = 1,nkr
+             read(11,"(3E13.5)")X_seed(n), seed_n(n), seed_rad(n)
+          end do ;close(11) !g , cm-3, cm
+          seed_n = seed_n*1.e6*dlnr !cm-3 --> m-3
+
+        scalar = 0.0
         DO j=jms,jme
            DO k=kms,kme    
            DO i=ims,ime
+              !IF (ide .eq. 151 .and. zcgs(i,k,j).ge.800.0.and.zcgs(i,k,j).le.1200.0) THEN 
+              !    krr = 0
+              !    do n = p_ff9i01,p_ff9i43 
+              !       krr = krr + 1
+              !       scalar(i,k,j,n) = seed_n(krr)!1.e8 
+              !    end do
+              !END IF
               nn(i,k,j) = ccn0 !(NANEW1+NANEW2)!m-3 
               qccon2(i,k,j) = 0.0 
               qcevp2(i,k,j) = 0.0 
@@ -393,6 +462,12 @@ CONTAINS
       DO j=jts,jte
          DO k=kts,kte
          DO i=its,ite
+            krr = 0
+            do n = p_ff9i01,p_ff9i43 
+               krr = krr + 1
+               fccn(i,k,krr) = scalar(i,k,j,n) 
+            end do
+
             t(i,k)=th(i,k,j)*pii(i,k,j)
             qci(i,k,1) = qc(i,k,j)
             qci(i,k,2) = qi(i,k,j)
@@ -428,7 +503,7 @@ CONTAINS
          ENDDO
          !  Sending array starting locations of optional variables may cause
          !  troubles, so we explicitly change the call.
-         CALL wdm62D(t, q(ims,kms,j), qci, qrs, ncr, w2d          &
+         CALL wd6s2D(t, q(ims,kms,j), qci, qrs, ncr, w2d          &
                     ,den(ims,kms,j)                               &
                     ,p(ims,kms,j), delz(ims,kms,j)                &
                     ,delt,g, cpd, cpv, ccn0, rd, rv, t0c          &
@@ -449,10 +524,16 @@ CONTAINS
                     ,qchet2d,qchom2d,qlq2s2d                      &
                     ,qraut2d,qracw2d,qaacwfr,qaacwfg,qrevprc      &
                     ,qgeml2d,qgfrz2d,qiacr2d,qsacr2d,qgacr2d      &
-                    ,qseml2d,qgevp2d &
+                    ,qseml2d,qgevp2d, fccn &
                                                                    )
          DO K=kts,kte
          DO I=its,ite
+            krr = 0
+            do n = p_ff9i01,p_ff9i43 
+               krr = krr + 1
+               scalar(i,k,j,n) = max(fccn(i,k,krr),0.)
+            end do
+
             th(i,k,j)=t(i,k)/pii(i,k,j)
             qc(i,k,j) = qci(i,k,1)
             qi(i,k,j) = qci(i,k,2)
@@ -502,6 +583,19 @@ CONTAINS
             qgdep2(i,k,j) = qgdep2d(i,k,2) 
             qgsub2(i,k,j) = qgsub2d(i,k,2) 
             qgevp2(i,k,j) = qgevp2d(i,k) 
+            if (mod(itimestep-180*21,11).eq.0.and.itimestep.ge.180*21 &
+                .and. itimestep.le.180*21+11*34.and.ide.eq.151) then   
+                if (zcgs(i,k,j).ge.800.0.and.zcgs(i,k,j).le.1200.0    &
+                    .and.j.ge.34-10.and.j.le.34+10                    &
+                    .and.i.ge.68-10.and.i.le.68+10) then 
+                    th(i,k,j)=(t(i,k)+1.0/35.0)/pii(i,k,j)
+                    krr = 0
+                    do n = p_ff9i01,p_ff9i43 
+                       krr = krr + 1
+                       scalar(i,k,j,n) = max(scalar(i,k,j,n)+seed_n(krr),0.)!1.e8 
+                    end do
+                end if
+            end if
          ENDDO
          ENDDO
          if (.false.) then
@@ -569,10 +663,10 @@ CONTAINS
            
       ENDDO
  
-  END SUBROUTINE wdm6
+  END SUBROUTINE wd6s
 !===================================================================
 !
-  SUBROUTINE wdm62D(t, q, qci, qrs, ncr, w, den, p, delz             &
+  SUBROUTINE wd6s2D(t, q, qci, qrs, ncr, w, den, p, delz             &
                    ,delt,g, cpd, cpv, ccn0, rd, rv, t0c           &
                    ,ep1, ep2, qmin                                &
                    ,XLS, XLV0, XLF0, den0, denr                   &
@@ -591,7 +685,7 @@ CONTAINS
                    ,qchet_rt,qchom_rt,qlq2s_rt                    &
                    ,qraut_rt,qracw_rt,qaacw_fr,qaacw_fg,qrevp_rc  &
                    ,qgeml_rt,qgfrz_rt,qiacr_rt,qsacr_rt,qgacr_rt  &
-                   ,qseml_rt,qgevp_rt & 
+                   ,qseml_rt,qgevp_rt, fccn & 
                                                                   )
 !-------------------------------------------------------------------
   IMPLICIT NONE
@@ -728,8 +822,10 @@ CONTAINS
 ! WORKING PARAMETERS FOR AEROSOL ACTIVATION (adopted by morr.)
   REAL AACT,GAMM,GG,PSI,ETA1,ETA2,SM1,SM2,SMAX,UU1,UU2,ALPHA,dum &
       &,DUM1,DUM2,SIGVL,NEW_N1,NEW_N2
-  real, parameter :: pi = 3.1415926536 
   integer :: iact
+!seeding bin
+  real, dimension( its:ite , kts:kte, nkr ) :: fccn, ff
+  real :: tt1,qq1,pp1,rhoa1,fccni,rccni,ffwi,supw
   
 !
 !=================================================================
@@ -2187,7 +2283,40 @@ CONTAINS
 ! pcact: QV -> QC                                 [LH 8]  [KK 14]
 ! ncact: NCCN -> NC m-3 s-1                       [LH A2] [KK 12]
 !---------------------------------------------------------------
-       iact = 2
+     !seeding bin method---------------------
+         if (ide.eq.151) then
+           ff(i,k,:) = 0.0
+           rccni = r_hydro(1,11) !raindrop radius 20 micro-m
+           do n=nkr, 1, -1 ! large aerosol first
+              fccni = fccn(i,k,n)
+              if(fccni.gt.0.0) then
+                 tt1   = t(i,k) !K
+                 qq1   = q(i,k) !kg/kg-1
+                 pp1   = p(i,k) !Pa
+                 rhoa1 = pp1/tt1/287. !Rd = 287.
+                 ffwi  = ff(i,k,max(n-25,1)) !m-3
+                 call water_nucl(tt1, pp1, qq1, rhoa1 &
+     &                          ,fccni, rccni, ffwi   &
+     &                          ,xl(i,k), cpm(i,k),supw)
+                 t(i,k) = tt1
+                 q(i,k) = max(qq1,0.)
+                 fccn(i,k,n) = max(fccni,0.)
+                 ff(i,k,max(n-25,1)) = max(ffwi,0.)
+              end if
+              rccni = rccni/exp(dlnr)
+           end do
+           rh(i,k,1) = max(supw+1.0, qmin)  !update RH for iact 1
+           evs(i,k) = q(i,k)/rh(i,k,1)      !q_s for iact 2
+           ff(i,k,:) = ff(i,k,:)/den(i,k)*mass_hydro(:) !m-3 --> kg kg-1
+           qci(i,k,1) = qci(i,k,1) + sum(ff(i,k,1:kr_droplet))
+           qrs(i,k,1) = qrs(i,k,1) + sum(ff(i,k,kr_droplet+1:nkr))
+           ncr(i,k,2) = ncr(i,k,2) + sum(ff(i,k,1:kr_droplet) &
+     &                                     /mass_hydro(1:kr_droplet)) 
+           ncr(i,k,3) = ncr(i,k,3) + sum(ff(i,k,kr_droplet+1:nkr) &
+     &                                     /mass_hydro(kr_droplet+1:nkr)) 
+         end if
+     !---------------------------------------
+       iact = 2 
        if (iact .eq. 1) then 
           if(rh(i,k,1).gt.1.) then
             ncact(i,k) = max(0.,((ncr(i,k,1)+ncr(i,k,2))                       &
@@ -2350,7 +2479,7 @@ CONTAINS
 
       enddo                  ! big loops
 
-  END SUBROUTINE wdm62D
+  END SUBROUTINE wd6s2D
 ! ...................................................................
       REAL FUNCTION rgmma(x)
 !-------------------------------------------------------------------
@@ -2398,7 +2527,7 @@ CONTAINS
 ! - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
       END FUNCTION fpvs
 !-------------------------------------------------------------------
-  SUBROUTINE wdm6init(den0,denr,dens,cl,cpv, ccn0, hail_opt, allowed_to_read) ! RAS
+  SUBROUTINE wd6sinit(den0,denr,dens,cl,cpv, ccn0, hail_opt, allowed_to_read) ! RAS
 !-------------------------------------------------------------------
   IMPLICIT NONE
 !-------------------------------------------------------------------
@@ -2423,7 +2552,7 @@ CONTAINS
          lamdagmax = 6.e4
       ENDIF
 !
-   pi = 4.*atan(1.)
+   !pi = 4.*atan(1.)
    xlv1 = cl-cpv
 !
    qc0  = 4./3.*pi*denr*r0**3*xncr/den0  ! 0.419e-3 -- .61e-3
@@ -2523,7 +2652,7 @@ CONTAINS
    call radar_init
 !+---+-----------------------------------------------------------------+
 !
-  END SUBROUTINE wdm6init
+  END SUBROUTINE wd6sinit
 !------------------------------------------------------------------------------
       subroutine slope_wdm6(qrs,ncr,den,denfac,t,rslope,rslopeb,rslope2,rslope3, &
                             vt,vtn,its,ite,kts,kte)
@@ -3268,6 +3397,18 @@ CONTAINS
 !
   END SUBROUTINE nislfv_rain_plm6
 !-------------------------------------------------------------------
+       real function esw(tt,Lv)
+       implicit none
+       real, intent(in) :: tt, Lv
+       real Rv,t00,a_w,b_w
+       !Lv  = 2.5008e6
+       Rv    = 461.51
+       t00 = 273.15
+       b_w = Lv/Rv
+       a_w = b_w/t00
+       esw = 611.*exp(a_w - b_w/tt)
+       end function esw
+!-------------------------------------------------------------------
       REAL FUNCTION DERF1(X)
       IMPLICIT NONE
       REAL X
@@ -3607,7 +3748,7 @@ CONTAINS
 !..Minimum microphys values
       real, parameter :: R1 = 1.E-12
       real, parameter :: R2 = 1.E-6
-      real, parameter :: pi = 3.1415926536
+      !real, parameter :: pi = 3.1415926536
       real, parameter :: bm_r = 3.0
       real, parameter :: obmr = 1.0/bm_r
       real, parameter :: cdm  = 5./3.
@@ -3663,5 +3804,51 @@ CONTAINS
 
       end subroutine effectRad_wdm6
 !-----------------------------------------------------------------------
+      subroutine water_nucl(tt,pp,qq,rhoa,fccni,rccni,ffwi &
+     & ,Lv,Cp,supw)
+      implicit none
+      real, intent(in) :: pp, rhoa, rccni, Lv, Cp
+      real, intent(inout) :: tt, qq, fccni, ffwi
+      real, intent(out) :: supw
+      real :: akoe1, bkoe1, rcrit, rccni_p, dmr &
+     & , qq1, tt1, factor
+      real :: t00 = 273.15
+      real :: tt_nucl_drop_min = -45.0
+      real :: eps = 287./461.51 !Rd/Rv
 
-END MODULE module_mp_wdm6
+      supw = (pp*qq/(eps+qq))/esw(tt,Lv)-1.0
+      if(supw.le.0.0.or.tt.lt.t00+tt_nucl_drop_min) return
+
+      akoe1=3.3e-05/tt
+      bkoe1=2.0*4.3/(22.9+35.5)*(4.0/3.0)*pi*2.16
+      rcrit=(akoe1/3.0)*(4.0/bkoe1/(supw**2))**(1.0/3.0)*1.0e-2 ! cm -> m
+
+      rccni_p = rccni/exp(dlnr)
+
+      if(rcrit.lt.rccni_p) then
+         factor = 1.0
+      else if(rcrit.lt.rccni) then
+         factor = (log(rccni)-log(rcrit))/(log(rccni)-log(rccni_p))
+      else
+         factor = 0.0
+         return
+      end if
+      !mass_hydro = 0.33510E-10 !first liquid bin in masses.asc
+      do
+         dmr  = fccni*factor*mass_hydro(1)/rhoa
+         qq1  = qq - dmr
+         tt1  = tt + dmr*Lv/Cp
+         supw = (pp*qq1/(eps+qq1))/esw(tt1,Lv)-1.0
+         if(supw.ge.0.0) exit
+            factor = factor * 0.95
+      end do
+      
+      qq = qq1
+      tt = tt1
+
+      ffwi  = ffwi + fccni*factor 
+      fccni = fccni*(1.0-factor)
+
+      end subroutine water_nucl
+
+END MODULE module_mp_wdm6_seed
