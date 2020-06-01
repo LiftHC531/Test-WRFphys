@@ -88,6 +88,21 @@ def stat_kernel(dbz,medid):
     med = np.where(np.isnan(med), undef, med) 
     return med    
 
+def wks_setting(time):
+    time = time[0:19].replace("-",":").replace("T",":")
+    time = time.split(":") 
+    time = time[0]+time[1]+time[2]+"_"+time[3]+time[4]
+    image_name = "CFAD_"+time
+    print("---Plot:",image_name,"---")
+    wks = Ngl.open_wks(wks_type,image_name,rlist)
+    Ngl.define_colormap(wks,"matlab_jet")
+    res = Ngl.Resources()
+    res.nglMaximize = True
+    res.nglDraw  = False; res.nglFrame = False
+    res.vpWidthF = 0.74; res.vpHeightF = 0.54
+    LeftString = "Valid Time: "+time+" UTC"
+    return wks, res, LeftString   
+
 def cmap():
     colors = np.array([[0.10, 0.10, 0.10], [0.15, 0.15, 0.15], \
                     [0.20, 0.20, 0.20], [0.25, 0.25, 0.25], \
@@ -104,6 +119,7 @@ start_time = cpu_time()
 undef = 9.96920996839e+36
 ic = 68-1 #analysis center
 jc = 34-1
+#for j in range(jc-10, jc+11): print(j)
 (lev,nk) = delta_z()
 #--------------------------------------------------------------------
 Path = "/home/mlhchen/2020_rainmaking/20191205/Sensitivity/"
@@ -119,8 +135,8 @@ wks_type = "png"
 rlist = Ngl.Resources()
 rlist.wkWidth  = 3000 #page resolutio
 rlist.wkHeight = 3000
-for t in range(10,11):#ntimes):
-    print("\t"+str(times[t].values)[0:19])
+for t in range(ntimes):
+    dtime = str(times[t].values)[0:19]; print("\t"+dtime)
     dbz = getvar(ff, "REFL_10CM", timeidx=t)
     z = getvar(ff, "z", timeidx=t)
     dbz_m = interp(ff,t); #print(dbz_m)
@@ -133,18 +149,12 @@ for t in range(10,11):#ntimes):
     medid = np.argsort(dbz_stat,axis=1)[:, len(dbz_stat[0,:])//2]; #print(med.shape)
     IQ1id = np.argsort(dbz_stat,axis=1)[:, len(dbz_stat[0,:])//4]; #print(med.shape)
     IQ3id = np.argsort(dbz_stat,axis=1)[:, len(dbz_stat[0,:])*3//4]; #print(med.shape)
-    print(medid)
+    #print(medid.shape)
     med = stat_kernel(dbz_stat,medid)
     IQ1 = stat_kernel(dbz_stat,IQ1id)
     IQ3 = stat_kernel(dbz_stat,IQ3id)
     """ Plot """
-    wks = Ngl.open_wks(wks_type,"CFAD",rlist)
-    Ngl.define_colormap(wks,"matlab_jet")
-    res = Ngl.Resources()
-    res.nglMaximize = True
-    res.nglDraw  = False
-    res.nglFrame = False
-    res.vpWidthF = 0.74; res.vpHeightF = 0.54
+    (wks,res,leftname) = wks_setting(dtime)
     ##._FillValue = 9.96920996839e+36
     resl = copy.deepcopy(res) #for plot line
     res.cnLineLabelFormat="@*+^sg"
@@ -179,9 +189,6 @@ for t in range(10,11):#ntimes):
     res.pmLabelBarOrthogonalPosF = 0.03 #L- & R+ 
     res.pmLabelBarParallelPosF = 0.55   #B- & T+  
 
-
-
-
     res.tmXBLabelFont = 26; res.tmYLLabelFont = res.tmXBLabelFont 
     res.tmXBMajorThicknessF = 10; res.tmYLMajorThicknessF = res.tmXBMajorThicknessF
     res.tmXBMinorThicknessF = 10; res.tmYLMinorThicknessF = res.tmXBMinorThicknessF
@@ -205,9 +212,10 @@ for t in range(10,11):#ntimes):
     Ngl.overlay(plot[0],plot[3])
 
      
+    wrf_dim_info.ngl_Strings(wks, plot[0], left=leftname, center="", right="")
     Ngl.draw(plot[0])
     Ngl.frame(wks)
-    del res, resl, plot
+    Ngl.destroy(wks); del res, resl, plot
 
 Ngl.end()
 end_time = cpu_time(); end_time = (end_time - start_time)/60.0
