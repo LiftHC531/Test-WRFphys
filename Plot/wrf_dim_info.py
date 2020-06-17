@@ -11,6 +11,19 @@ def info(ff):
     nt = np.int32(len(t))
     return nt, nk, ny, nx, t
 
+def cwbrain_colorbar():
+    colors = np.array([
+     [1.000,1.000,1.000], [0.000,0.000,0.000], \
+     [1.000,1.000,1.000], [0.608,1.000,1.000], \
+     [0.000,0.812,1.000], [0.039,0.596,1.000], [0.039,0.396,1.000], \
+     [0.188,0.600,0.039], [0.196,1.000,0.000], \
+     [0.973,1.000,0.000], [1.000,0.796,0.000], [1.000,0.603,0.000], \
+     [0.980,0.012,0.000], [0.800,0.000,0.012], [0.627,0.000,0.000], \
+     [0.596,0.000,0.604], [0.765,0.016,0.800], \
+     [0.973,0.020,0.953], [0.996,0.796,1.000], \
+    ],'f')
+    return colors
+
 #-- Routine ngl_Strings: draw left, right and/or center string
 def ngl_Strings(wks, plot, left='', center='', right=''):
     """
@@ -53,3 +66,4 @@ def ngl_Strings(wks, plot, left='', center='', right=''):
 if __name__ == '__main__':
    info()
    ngl_Strings()
+   cwbrain_colorbar()
