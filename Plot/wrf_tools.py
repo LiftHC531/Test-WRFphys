@@ -25,13 +25,13 @@ def info(ff):
 def search_wrf_file(Path="./"):
     FileID = glob.glob(Path+"*wrf*:*") #just like "ls *wrf*:*"
     for i, Filename in enumerate(FileID): print("\033[92m({}){}\033[0m".format(i,Filename))
-    ID = input("\033[92mInput File ID:\t\033[0m")
+    ID = input("\033[92mInput File ID[0-{}]: \033[0m".format(len(FileID)-1))
     if ID.replace(".","",1).isdigit() and float(ID) >= 0.0: #integer or float True
        File = FileID[int(round(float(ID),0))]
     else:
        File = FileID[0] #Default: 0
        print("\033[91m\tCan't find ur input ID (Default: 0)\033[0m")
-    print("\033[103mThe choosen file: "+File+"\033[0m")
+    print("\033[103m\033[30mThe choosen file: "+File+"\033[0m")
     return File
 
 def check_plt_time(nt,times):
@@ -43,10 +43,21 @@ def check_plt_time(nt,times):
           tid.append(input("\033[92m  Select end Time [{}-{}]: \033[0m".format(tid[0],nt-1)))
           if tid[1] == "": tid[1] = tid[0] #Default
           tid = [np.int(i) for i in tid]
-          for i, time in enumerate(times):
-              time_print = "\t({:02d}){}".format(i,str(time.values)[0:19])
-              if i >= tid[0] and i <= tid[1]: print(time_print)
-              else: print("\033[90m"+time_print+"\033[0m")
+          #for i, time in enumerate(times):
+          #    time_print = "\t({:02d}){}".format(i,str(time.values)[0:19])
+          #    if i >= tid[0] and i <= tid[1]: print(time_print)
+          #    else: print("\033[90m"+time_print+"\033[0m")
+          for i in range(30):
+              time_print = ""
+              for j,time in enumerate(times):
+                  if j % 30 == i:
+                     if j >= tid[0] and j <= tid[1]:
+                        time_print = time_print+"\t({:02d}){}".format(j,str(time.values)[0:19])
+                     else: 
+                        time_print = time_print+"\033[90m\t({:02d}){}\033[0m"\
+                                     .format(j,str(time.values)[0:19])
+              print(time_print)
+
           check_time = input("\033[92mConfirm for the selected time ? (Y/N) \033[0m").strip()
           check_time = np.where(check_time == "y","Y",check_time)
     return tid
@@ -63,7 +74,7 @@ def add_shapefile_polylines(ff,wks,plot,color="black",thick=10.0):
     lnres.gsSegments = f_shap.variables["segments"][:,0]
     return Ngl.add_polyline(wks, plot, lon, lat, lnres)
 
-def plt_marker(wks,plot,lat,lon,jc=50,ic=50,\
+def plt_marker(wks,plot,lat,lon,log,jc=50,ic=50,\
                    idx=12,sz=20.0,tk=10.0,cr="black"):
     """ Add some polymarkers showing the original locations of the X,Y points."""
     def add_polymarker(wks,plot,xd,yd,index,size,thick,color):
@@ -74,13 +85,20 @@ def plt_marker(wks,plot,lat,lon,jc=50,ic=50,\
         #poly_res.gsMarkerOpacityF = 0.3
         poly_res.gsMarkerColor = color #purple4 # choose color
         return Ngl.add_polymarker(wks, plot, xd, yd, poly_res)
-    #Default: N
-    check_plt = input("\033[92mPlot Marker at ({},{}) ? (Y/N) \033[0m".format(jc,ic))
-    check_plt = np.where(check_plt == "y","Y",check_plt)
-    if check_plt == "Y": 
+    #log: only ask first time
+    check_plt = ""
+    if log == 0:
+       #Default: N
+       check_plt = input("\033[92mPlot Marker at ({},{}) ? (Y/N) \033[0m".format(jc,ic))
+       check_plt = np.where(check_plt == "y","Y",check_plt)
+    if check_plt == "Y" or log == 1: 
        xd = lon[jc,ic]; yd = lat[jc,ic]
        plot_marker = add_polymarker(wks,plot,xd,yd,idx,sz,tk,cr)
-       return plot_marker
+       log = 1
+    else:
+       plot_marker = None 
+       log = 2
+    return log,plot_marker
  
 def target_area(res,lat,lon,jc=50,ic=50,jrg=20,irg=20):
     plt_target_area = False #Default: N
