@@ -34,6 +34,24 @@ def search_wrf_file(Path="./"):
     print("\033[103mThe choosen file: "+File+"\033[0m")
     return File
 
+def check_plt_time(nt,times):
+    check_time = "N"
+    while check_time != "Y":
+          tid = []
+          tid.append(input("\033[92mSelect start Time [0-{}]: \033[0m".format(nt-1)))
+          if tid[0] == "": tid[0] = 0 #Default
+          tid.append(input("\033[92m  Select end Time [{}-{}]: \033[0m".format(tid[0],nt-1)))
+          if tid[1] == "": tid[1] = tid[0] #Default
+          tid = [np.int(i) for i in tid]
+          for i, time in enumerate(times):
+              time_print = "\t({:02d}){}".format(i,str(time.values)[0:19])
+              if i >= tid[0] and i <= tid[1]: print(time_print)
+              else: print("\033[90m"+time_print+"\033[0m")
+          check_time = input("\033[92mConfirm for the selected time ? (Y/N) \033[0m").strip()
+          check_time = np.where(check_time == "y","Y",check_time)
+    return tid
+
+
 def add_shapefile_polylines(ff,wks,plot,color="black",thick=10.0):
     """ Attach shapefile polylines to map """
     f_shap = Nio.open_file(ff, "r")
@@ -45,15 +63,34 @@ def add_shapefile_polylines(ff,wks,plot,color="black",thick=10.0):
     lnres.gsSegments = f_shap.variables["segments"][:,0]
     return Ngl.add_polyline(wks, plot, lon, lat, lnres)
 
-def target_area(res,lat,lon,jc=33,ic=67,jrg=15,irg=15):
-    plt_target_area = False
+def plt_marker(wks,plot,lat,lon,jc=50,ic=50,\
+                   idx=12,sz=20.0,tk=10.0,cr="black"):
+    """ Add some polymarkers showing the original locations of the X,Y points."""
+    def add_polymarker(wks,plot,xd,yd,index,size,thick,color):
+        poly_res = Ngl.Resources()
+        poly_res.gsMarkerIndex = index #4   # choose circle as polymarker
+        poly_res.gsMarkerSizeF = size       # select size to avoid streaking
+        poly_res.gsMarkerThicknessF = thick #30.0
+        #poly_res.gsMarkerOpacityF = 0.3
+        poly_res.gsMarkerColor = color #purple4 # choose color
+        return Ngl.add_polymarker(wks, plot, xd, yd, poly_res)
+    #Default: N
+    check_plt = input("\033[92mPlot Marker at ({},{}) ? (Y/N) \033[0m".format(jc,ic))
+    check_plt = np.where(check_plt == "y","Y",check_plt)
+    if check_plt == "Y": 
+       xd = lon[jc,ic]; yd = lat[jc,ic]
+       plot_marker = add_polymarker(wks,plot,xd,yd,idx,sz,tk,cr)
+       return plot_marker
+ 
+def target_area(res,lat,lon,jc=50,ic=50,jrg=20,irg=20):
+    plt_target_area = False #Default: N
     check_plt_area = input("\033[92mPlot target area ? (Y/N) \033[0m")
     check_plt_area = np.where(check_plt_area == "y","Y",check_plt_area)
-    if check_plt_area == "Y": plt_target_area = True
-    if plt_target_area:
+    if check_plt_area == "Y": 
        pt = [jc,ic] 
        jj = np.array([pt[0]-jrg, pt[0]+jrg]).astype(int) 
        ii = np.array([pt[1]-irg, pt[1]+irg]).astype(int)
+       plt_target_area = True
     else:
        jj = np.array([0, len(lat[:,0])-1]).astype(int)
        ii = np.array([0, len(lat[0,:])-1]).astype(int)
@@ -68,8 +105,7 @@ def target_area(res,lat,lon,jc=33,ic=67,jrg=15,irg=15):
      .format(jj[0],res.mpLeftCornerLatF,ii[0],res.mpLeftCornerLonF, \
              jj[1],res.mpRightCornerLatF,ii[1],res.mpRightCornerLonF))
         
-    return res, ii, jj
-
+    return res, ii, jj, plt_target_area
 
 def cwbrain_colorbar():
     colors = np.array([
@@ -152,19 +188,18 @@ def Date_string(yy,mm,dd,hh,mi,TW_LST=False):
        time_cord = "LST"
        hh = str(int(hh) + 8) # UTC to LST, GMT+8
        (yy,mm,dd,hh) = det_mon_yr_add(yy,mm,dd,hh)
-       yy = str(int(yy) - 1911) # the year of the Republic Era
+       #yy = str(int(yy) - 1911) # the year of the Republic Era
        #print("{} LST {} {}, {}".format(hh,dd,mm,yy))
 
-    year = int(yy) #string to integer
-    mon  = int(mm)
-    day  = int(dd)
-    hr   = int(hh)
+    #string to integer
+    year = int(yy); mon  = int(mm)
+    day  = int(dd); hr   = int(hh)
     months = ["Jan.","Feb.","Mar.","Apr.","May","June", \
               "July","Aug.","Sept.","Oct.","Nov.","Dec."]
     for i, month in enumerate(months):
         mm = np.where(mon == i + 1, month, mm)
 
-    days_str = ["st","nd","rd"]
+    days_str = ["st","nd","rd"] # superscript
     if day <= 3:
        for i, day_str in enumerate(days_str):
            if day == i+1: dd = dd+"~S~"+day_str+"~N~"
@@ -179,7 +214,9 @@ def Date_string(yy,mm,dd,hh,mi,TW_LST=False):
 if __name__ == '__main__':
    info()
    search_wrf_file()
+   check_plt_time()
    add_shapefile_polylines()
+   plt_marker()
    cwbrain_colorbar()
    ngl_Strings()
    Date_string()
