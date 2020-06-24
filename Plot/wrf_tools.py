@@ -1,7 +1,9 @@
 import numpy as np
-from wrf import getvar,ALL_TIMES,get_pyngl,latlon_coords,to_np
+from wrf import getvar,ALL_TIMES,get_pyngl,latlon_coords,to_np, \
+                interplevel
 import Ngl, Nio
 import glob
+from concurrent.futures import ProcessPoolExecutor,ThreadPoolExecutor
 
 #Li-Hsin Chen 2020
 
@@ -39,24 +41,26 @@ def check_plt_time(nt,times):
     while check_time != "Y":
           tid = []
           tid.append(input("\033[92mSelect start Time [0-{}]: \033[0m".format(nt-1)))
-          if tid[0] == "": tid[0] = 0 #Default
+          if tid[0].replace(".","",1).isdigit() == False: tid[0] = 0 #Default
           tid.append(input("\033[92m  Select end Time [{}-{}]: \033[0m".format(tid[0],nt-1)))
-          if tid[1] == "": tid[1] = tid[0] #Default
+          if tid[1].replace(".","",1).isdigit() == False: tid[1] = tid[0] #Default
           tid = [np.int(i) for i in tid]
-          #for i, time in enumerate(times):
-          #    time_print = "\t({:02d}){}".format(i,str(time.values)[0:19])
-          #    if i >= tid[0] and i <= tid[1]: print(time_print)
-          #    else: print("\033[90m"+time_print+"\033[0m")
-          for i in range(30):
-              time_print = ""
-              for j,time in enumerate(times):
-                  if j % 30 == i:
-                     if j >= tid[0] and j <= tid[1]:
-                        time_print = time_print+"\t({:02d}){}".format(j,str(time.values)[0:19])
-                     else: 
-                        time_print = time_print+"\033[90m\t({:02d}){}\033[0m"\
-                                     .format(j,str(time.values)[0:19])
-              print(time_print)
+          if len(times) <= 30:
+             for i, time in enumerate(times):
+                 time_print = "\t({:02d}){}".format(i,str(time.values)[0:19])
+                 if i >= tid[0] and i <= tid[1]: print(time_print)
+                 else: print("\033[90m"+time_print+"\033[0m")
+          else:
+             for i in range(30):
+                 time_print = ""
+                 for j,time in enumerate(times):
+                     if j % 30 == i:
+                        if j >= tid[0] and j <= tid[1]:
+                           time_print = time_print+"\t({:02d}){}".format(j,str(time.values)[0:19])
+                        else: 
+                           time_print = time_print+"\033[90m\t({:02d}){}\033[0m"\
+                                        .format(j,str(time.values)[0:19])
+                 print(time_print)
 
           check_time = input("\033[92mConfirm for the selected time ? (Y/N) \033[0m").strip()
           check_time = np.where(check_time == "y","Y",check_time)
@@ -124,6 +128,37 @@ def target_area(res,lat,lon,jc=50,ic=50,jrg=20,irg=20):
              jj[1],res.mpRightCornerLatF,ii[1],res.mpRightCornerLonF))
         
     return res, ii, jj, plt_target_area
+
+#Test ProcessPoolExecutor & ThreadPoolExecutor
+def interp_z(ff,time,varname,thread=True,cores=7):
+    """ thread = True may be faster"""
+    # global variables 
+    z = getvar(ff, "z", timeidx=time) 
+    var = getvar(ff, str(varname), timeidx=time)
+    """ interpolation to vertical coordinate """
+    def delta_z(kbot=100,nk=150):
+        kk = kbot # m bottom
+        # top 15.0 km
+        lev = np.zeros(nk,dtype=np.float32)
+        for k in range(nk):
+            lev[k] = kk; #print(lev[k])
+            kk += 100.0
+        return lev, nk
+
+    (lev,nk) = delta_z() # dz for interpolation
+    ny = np.int32(len(var[0,:,0]))
+    nx = np.int32(len(var[0,0,:]))
+    var_m = np.zeros(shape=(nk,ny,nx), dtype=np.float32)
+    print("Interpolation dimensions (k,j,i): \033[93m{}\033[0m".format(var_m.shape))
+    if thread:
+       with ThreadPoolExecutor(max_workers=cores) as executor:
+            for k in range(nk):
+                var_m[k,:,:] = executor.submit(interplevel,var,z,lev[k]).result()
+    else:
+       for k in range(nk):
+           var_m[k,:,:] = interplevel(var, z, lev[k])
+   
+    return var_m
 
 def cwbrain_colorbar():
     colors = np.array([
@@ -206,7 +241,7 @@ def Date_string(yy,mm,dd,hh,mi,TW_LST=False):
        time_cord = "LST"
        hh = str(int(hh) + 8) # UTC to LST, GMT+8
        (yy,mm,dd,hh) = det_mon_yr_add(yy,mm,dd,hh)
-       #yy = str(int(yy) - 1911) # the year of the Republic Era
+       #####yy = str(int(yy) - 1911) # the year of the Republic Era
        #print("{} LST {} {}, {}".format(hh,dd,mm,yy))
 
     #string to integer
@@ -235,6 +270,7 @@ if __name__ == '__main__':
    check_plt_time()
    add_shapefile_polylines()
    plt_marker()
+   interp_z()
    cwbrain_colorbar()
    ngl_Strings()
    Date_string()
